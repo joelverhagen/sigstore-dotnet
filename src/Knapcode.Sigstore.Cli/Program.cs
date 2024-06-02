@@ -12,7 +12,7 @@ internal class Program
 {
     private static async Task Main(string[] args)
     {
-        HttpClient.DefaultProxy = new WebProxy("http://127.0.0.1:8888/", false);
+        // HttpClient.DefaultProxy = new WebProxy("http://127.0.0.1:8888/", false);
 
         var host = new HostBuilder()
             .ConfigureServices(services =>
