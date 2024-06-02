@@ -33,7 +33,12 @@ public class SigstoreDevAuthenticator : IAsyncDisposable
                 {
                     Issuer = new Uri("https://oauth2.sigstore.dev/auth", UriKind.Absolute),
                     ClientId = "sigstore",
-                    Scopes = { Scopes.OpenId, Scopes.Email, Scopes.OfflineAccess },
+                    Scopes =
+                    {
+                        Scopes.OpenId,
+                        Scopes.Email,
+                        Scopes.OfflineAccess,
+                    },
                 });
             });
 

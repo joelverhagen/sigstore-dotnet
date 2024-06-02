@@ -141,7 +141,8 @@ public class InteractiveService : BackgroundService
 
 
         var handler = new JwtSecurityTokenHandler();
-        var token = handler.ReadJwtToken(authenticationResult.IdToken);
+        var accessToken = handler.ReadJwtToken(authenticationResult.AccessToken);
+        var idToken = handler.ReadJwtToken(authenticationResult.IdToken);
 
         AnsiConsole.MarkupLine("[green]Authentication successful:[/]");
 
@@ -150,7 +151,7 @@ public class InteractiveService : BackgroundService
             .AddColumn(new TableColumn("Claim value type").Centered())
             .AddColumn(new TableColumn("Claim value").Centered());
 
-        foreach (var claim in token.Claims)
+        foreach (var claim in idToken.Claims)
         {
             table.AddRow(
                 claim.Type.EscapeMarkup(),
@@ -161,43 +162,40 @@ public class InteractiveService : BackgroundService
         AnsiConsole.Write(table);
 
         using HttpClient httpClient = new HttpClient();
-        // httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", authenticationResult.AccessToken);
+        httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", authenticationResult.AccessToken);
+
         var fulcioClient = new FulcioClient(httpClient);
         fulcioClient.BaseUrl = "https://fulcio.sigstore.dev/";
 
-        var legacyFulcioClient = new FulcioLegacyClient(httpClient);
-        legacyFulcioClient.BaseUrl = "https://fulcio.sigstore.dev/";
+        using RSA rsa = RSA.Create(keySizeInBits: 4096);
 
-        using RSA rsa = RSA.Create(2048);
-        
+        var email = idToken.Claims.Single(x => x.Type == "email").Value;
+
         var request = new CertificateRequest(
-            "CN=joel.verhagen@gmail.com",
+            "CN=ignored",
             rsa,
             HashAlgorithmName.SHA256,
             RSASignaturePadding.Pkcs1);
 
-        request.CertificateExtensions.Add(
-            new X509BasicConstraintsExtension(
-                certificateAuthority: false, 
-                hasPathLengthConstraint: false,
-                pathLengthConstraint: 0,
-                critical: true));        
+        var proofOfPossession = rsa.SignData(Encoding.UTF8.GetBytes(email), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
 
         var response = await fulcioClient.CreateSigningCertificateAsync(new Fulciov2CreateSigningCertificateRequest
         {
-           Credentials = new V2Credentials { OidcIdentityToken = authenticationResult.AccessToken },
-           CertificateSigningRequest = Encoding.UTF8.GetBytes(request.CreateSigningRequestPem()),
-           /*
            PublicKeyRequest = new V2PublicKeyRequest
            {
-               ProofOfPossession = rsa.SignData(Encoding.UTF8.GetBytes(token.Subject), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1),
+               ProofOfPossession = proofOfPossession,
                PublicKey = new Fulciov2PublicKey
                {
                    Algorithm = V2PublicKeyAlgorithm.RSA_PSS,
-                   Content = request.PublicKey.GetRSAPublicKey()!.ExportRSAPublicKeyPem()
+                   Content = rsa.ExportRSAPublicKeyPem(),
                }
            }
-           */
         }, cancellationToken);
+
+        var leafPem = response.SignedCertificateEmbeddedSct.Chain.Certificates.First();
+        var leafCert = X509Certificate2.CreateFromPem(leafPem).CopyWithPrivateKey(rsa);
+        Console.WriteLine($"Saving .cer and .pfx for leaf certificate with fingerprint {leafCert.Thumbprint}.");
+        File.WriteAllBytes(leafCert.Thumbprint + ".cer", leafCert.Export(X509ContentType.Cert));
+        File.WriteAllBytes(leafCert.Thumbprint + ".pfx", leafCert.Export(X509ContentType.Pfx));
     }
 }
